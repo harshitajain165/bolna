@@ -39,14 +39,22 @@ class BaseS2SProvider(ABC):
         ...
 
     @abstractmethod
-    async def receive_events(self) -> AsyncGenerator:
-        """Yield provider-agnostic S2S events (AudioDelta, TranscriptDelta, etc.)."""
-        ...  # pragma: no cover
-        yield  # make it a generator  # noqa: E701
+    def receive_events(self) -> AsyncGenerator:
+        """Yield provider-agnostic S2S events (AudioDelta, TranscriptDelta, etc.).
+
+        Implementations are async generators (``async def`` with ``yield``).
+        Declared here as a regular abstract method so the base class isn't itself
+        a generator stub.
+        """
 
     @abstractmethod
     async def send_function_result(self, call_id: str, result: str) -> None:
         """Return the result of a function call back to the provider."""
+        ...
+
+    @abstractmethod
+    async def commit_function_results(self) -> None:
+        """Tell the provider to continue after function_call_output(s) submitted."""
         ...
 
     @abstractmethod

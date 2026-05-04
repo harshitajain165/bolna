@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 import time
@@ -110,10 +111,38 @@ class OpenAIRealtimeS2S(BaseS2SProvider):
             raise ConnectionError(f"OpenAI Realtime handshake failed: {error_msg}")
 
         await self._send_session_update()
+        await self._await_session_updated()
         logger.info(
             f"OpenAI Realtime connected in {self.connection_time:.0f}ms | "
             f"model={self.model} format={'beta' if self._is_beta_model else 'GA'}"
         )
+
+    async def _await_session_updated(self, timeout: float = 2.0) -> None:
+        """Drain events until ``session.updated`` (success) or ``error``.
+
+        Surfaces config errors at connect time instead of failing silently mid-call.
+        Falls through on timeout — any errors will still surface later via the
+        normal event stream as S2SError.
+        """
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            remaining = max(0.05, deadline - time.time())
+            try:
+                raw = await asyncio.wait_for(self._ws.recv(), timeout=remaining)
+            except asyncio.TimeoutError:
+                logger.warning("OpenAI Realtime: no session.updated within %.1fs; continuing", timeout)
+                return
+            event = json.loads(raw)
+            event_type = event.get("type", "")
+            if event_type == "session.updated":
+                return
+            if event_type == "error":
+                err = event.get("error", {})
+                raise ConnectionError(
+                    f"OpenAI Realtime session.update rejected: "
+                    f"{err.get('message', 'unknown')} (code={err.get('code', '')})"
+                )
+            # Other early events are unusual but harmless; ignore and keep waiting.
 
     async def _send_session_update(self) -> None:
         """Send session.update using the correct format for the model."""
@@ -410,6 +439,8 @@ class OpenAIRealtimeS2S(BaseS2SProvider):
                         "parameters": tool.get("parameters", {}),
                     }
                 )
+            else:
+                logger.warning("S2S: dropping malformed tool entry: %r", tool)
         return formatted
 
     def _extract_usage(self, event: dict) -> Optional[dict]:
