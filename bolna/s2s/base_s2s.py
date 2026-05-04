@@ -34,19 +34,13 @@ class BaseS2SProvider(ABC):
     async def send_audio(self, pcm_24k_bytes: bytes) -> None: ...
 
     @abstractmethod
-    async def receive_events(self) -> AsyncGenerator:
-        # Implementations are async generators; this stub just declares the contract.
-        if False:
-            yield
-        raise NotImplementedError
+    async def receive_events(self) -> AsyncGenerator: ...
 
     @abstractmethod
     async def send_function_result(self, call_id: str, result: str) -> None: ...
 
     @abstractmethod
-    async def commit_function_results(self) -> None:
-        # Caller has submitted all function_call_output items; trigger model continuation.
-        ...
+    async def commit_function_results(self) -> None: ...
 
     @abstractmethod
     async def trigger_response(self, instructions: Optional[str] = None) -> None: ...

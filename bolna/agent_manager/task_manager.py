@@ -4190,7 +4190,6 @@ class TaskManager(BaseManager):
         await s2s.connect()
         logger.info("S2S conversation started")
 
-        self._s2s_last_user_transcript = ""
         self._s2s_last_assistant_transcript = ""
         self._s2s_turn_seq = 0
         self._s2s_pending_calls: set = set()
@@ -4318,7 +4317,6 @@ class TaskManager(BaseManager):
                     logger.info(f"S2S user said: {event.content[:200]}")
                     self.conversation_history.append_user(event.content)
                     self.time_since_last_spoken_human_word = time.time()
-                    self._s2s_last_user_transcript = event.content
 
             elif isinstance(event, FunctionCall):
                 self._s2s_dispatch_function_call(event)
@@ -4392,7 +4390,6 @@ class TaskManager(BaseManager):
             output_tokens=usage.get("output_tokens", 0),
             cached_tokens=usage.get("cached_tokens", 0) or None,
         )
-        self._s2s_last_user_transcript = ""
         self._s2s_last_assistant_transcript = ""
 
     def _s2s_dispatch_function_call(self, event: FunctionCall):
