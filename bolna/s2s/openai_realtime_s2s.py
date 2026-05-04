@@ -118,12 +118,7 @@ class OpenAIRealtimeS2S(BaseS2SProvider):
         )
 
     async def _await_session_updated(self, timeout: float = 2.0) -> None:
-        """Drain events until ``session.updated`` (success) or ``error``.
-
-        Surfaces config errors at connect time instead of failing silently mid-call.
-        Falls through on timeout — any errors will still surface later via the
-        normal event stream as S2SError.
-        """
+        # Surface session.update rejections at connect time; mid-call surfacing is too late.
         deadline = time.time() + timeout
         while time.time() < deadline:
             remaining = max(0.05, deadline - time.time())
@@ -142,10 +137,8 @@ class OpenAIRealtimeS2S(BaseS2SProvider):
                     f"OpenAI Realtime session.update rejected: "
                     f"{err.get('message', 'unknown')} (code={err.get('code', '')})"
                 )
-            # Other early events are unusual but harmless; ignore and keep waiting.
 
     async def _send_session_update(self) -> None:
-        """Send session.update using the correct format for the model."""
         if self._is_beta_model:
             session_config = self._build_beta_session_config()
         else:
@@ -346,11 +339,7 @@ class OpenAIRealtimeS2S(BaseS2SProvider):
     # ------------------------------------------------------------------
 
     async def send_function_result(self, call_id: str, result: str) -> None:
-        """Submit a single function_call_output item.
-
-        Does not trigger a response — call commit_function_results() once after
-        all outputs for a given response.done have been submitted.
-        """
+        # Caller must invoke commit_function_results() once after the last reply.
         await self._send(
             {
                 "type": "conversation.item.create",
@@ -363,7 +352,6 @@ class OpenAIRealtimeS2S(BaseS2SProvider):
         )
 
     async def commit_function_results(self) -> None:
-        """Tell the model to continue after function_call_output(s) submitted."""
         await self._send({"type": "response.create"})
 
     # ------------------------------------------------------------------
@@ -444,13 +432,6 @@ class OpenAIRealtimeS2S(BaseS2SProvider):
         return formatted
 
     def _extract_usage(self, event: dict) -> Optional[dict]:
-        """Extract token usage from a response.done event and accumulate it.
-
-        OpenAI Realtime returns:
-            response.usage.{input_tokens, output_tokens,
-                            input_token_details.{text_tokens, audio_tokens, cached_tokens},
-                            output_token_details.{text_tokens, audio_tokens}}
-        """
         raw = (event.get("response") or {}).get("usage")
         if not raw:
             return None

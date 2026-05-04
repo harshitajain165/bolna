@@ -45,11 +45,6 @@ class DictWithMissing(dict):
 
 
 def is_s2s_agent(task_or_config: dict) -> bool:
-    """Whether an agent task / agent_config tree describes an S2S agent.
-
-    Accepts either a single task dict (with ``tools_config`` inside) or a raw
-    ``tools_config`` dict.
-    """
     if not isinstance(task_or_config, dict):
         return False
     tools_config = task_or_config.get("tools_config", task_or_config)
@@ -766,7 +761,7 @@ def convert_to_request_log(
     log["cached"] = is_cached
     log["is_final"] = False
     match component:
-        case LogComponent.LLM:
+        case LogComponent.LLM | LogComponent.S2S:
             log["latency"] = meta_info.get("llm_latency", None) if direction == LogDirection.RESPONSE else None
             log["llm_metadata"] = meta_info.get("llm_metadata", None)
             if direction == LogDirection.RESPONSE:

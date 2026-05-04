@@ -201,6 +201,7 @@ class LogComponent(str, Enum):
     LLM_HANGUP = "llm_hangup"
     LLM_LANGUAGE_DETECTION = "llm_language_detection"
     LLM_VOICEMAIL = "llm_voicemail"
+    S2S = "s2s"
     SYNTHESIZER = "synthesizer"
     TRANSCRIBER = "transcriber"
     WARNING = "warning"

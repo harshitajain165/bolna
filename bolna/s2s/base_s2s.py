@@ -3,11 +3,10 @@ from typing import AsyncGenerator, List, Optional
 
 
 class BaseS2SProvider(ABC):
-    """Base class for speech-to-speech providers.
+    """Provider-agnostic interface for speech-to-speech models.
 
-    Any S2S provider (OpenAI Realtime, Gemini Live, etc.) implements this
-    interface.  TaskManager only interacts through these methods, keeping
-    the provider details isolated.
+    TaskManager interacts only through these methods, so a new provider
+    (Gemini Live, etc.) drops in by implementing this contract.
     """
 
     def __init__(
@@ -29,40 +28,28 @@ class BaseS2SProvider(ABC):
         self.turn_latencies: list = []
 
     @abstractmethod
-    async def connect(self) -> None:
-        """Open the WebSocket / session to the provider."""
-        ...
+    async def connect(self) -> None: ...
 
     @abstractmethod
-    async def send_audio(self, pcm_24k_bytes: bytes) -> None:
-        """Send PCM-16 24 kHz mono audio to the provider."""
-        ...
+    async def send_audio(self, pcm_24k_bytes: bytes) -> None: ...
 
     @abstractmethod
-    def receive_events(self) -> AsyncGenerator:
-        """Yield provider-agnostic S2S events (AudioDelta, TranscriptDelta, etc.).
-
-        Implementations are async generators (``async def`` with ``yield``).
-        Declared here as a regular abstract method so the base class isn't itself
-        a generator stub.
-        """
+    async def receive_events(self) -> AsyncGenerator:
+        # Implementations are async generators; this stub just declares the contract.
+        if False:
+            yield
+        raise NotImplementedError
 
     @abstractmethod
-    async def send_function_result(self, call_id: str, result: str) -> None:
-        """Return the result of a function call back to the provider."""
-        ...
+    async def send_function_result(self, call_id: str, result: str) -> None: ...
 
     @abstractmethod
     async def commit_function_results(self) -> None:
-        """Tell the provider to continue after function_call_output(s) submitted."""
+        # Caller has submitted all function_call_output items; trigger model continuation.
         ...
 
     @abstractmethod
-    async def trigger_response(self, instructions: Optional[str] = None) -> None:
-        """Ask the provider to generate a response (e.g. welcome message)."""
-        ...
+    async def trigger_response(self, instructions: Optional[str] = None) -> None: ...
 
     @abstractmethod
-    async def disconnect(self) -> None:
-        """Cleanly close the connection."""
-        ...
+    async def disconnect(self) -> None: ...

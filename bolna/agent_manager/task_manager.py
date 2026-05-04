@@ -4248,9 +4248,7 @@ class TaskManager(BaseManager):
                     break
                 continue
 
-            # Hold back user audio briefly while the welcome message starts so
-            # the agent's own voice doesn't trigger barge-in. After the gate
-            # window expires, audio flows through and provider VAD can fire.
+            # Suppress audio briefly so the agent's own welcome doesn't self-trigger VAD.
             if not self._s2s_welcome_done and self._s2s_within_welcome_gate():
                 chunks_discarded += 1
                 continue
@@ -4372,40 +4370,22 @@ class TaskManager(BaseManager):
             await self.tools["output"].handle(message)
 
     def _s2s_within_welcome_gate(self) -> bool:
-        """True while the welcome-message gate is still suppressing barge-in."""
         elapsed_ms = (time.time() - self._s2s_welcome_started_at) * 1000
         return elapsed_ms < self._s2s_welcome_gate_ms
 
     def _log_s2s_turn_usage(self, event: ResponseDone):
-        """Write LLM request/response rows to the run_id CSV so dashboard cost
-        calculation picks up S2S turns through the existing pipeline.
-        """
         usage = event.usage or {}
         s2s_cfg = self.task_config["tools_config"].get("s2s") or {}
         model = (s2s_cfg.get("provider_config") or {}).get("model") or "gpt-4o-realtime-preview"
 
         self._s2s_turn_seq += 1
-        seq_id = self._s2s_turn_seq
-        meta = {"request_id": str(uuid.uuid4()), "sequence_id": seq_id}
+        meta = {"request_id": str(uuid.uuid4()), "sequence_id": self._s2s_turn_seq}
 
-        # REQUEST row: user input that triggered this turn
-        if self._s2s_last_user_transcript:
-            convert_to_request_log(
-                message=self._s2s_last_user_transcript,
-                meta_info=meta,
-                model=model,
-                component=LogComponent.LLM,
-                direction=LogDirection.REQUEST,
-                run_id=self.run_id,
-            )
-
-        # RESPONSE row: assistant output + token counts
-        # Audio + text tokens summed into input/output; cached tokens tracked separately
         convert_to_request_log(
             message=event.transcript or self._s2s_last_assistant_transcript or "",
             meta_info=meta,
             model=model,
-            component=LogComponent.LLM,
+            component=LogComponent.S2S,
             direction=LogDirection.RESPONSE,
             run_id=self.run_id,
             input_tokens=usage.get("input_tokens", 0),
@@ -4416,22 +4396,12 @@ class TaskManager(BaseManager):
         self._s2s_last_assistant_transcript = ""
 
     def _s2s_dispatch_function_call(self, event: FunctionCall):
-        """Dispatch a tool call as a tracked task; commit response when all
-        outstanding calls have responded.
-        """
         self._s2s_pending_calls.add(event.call_id)
         task = asyncio.create_task(self._s2s_handle_function_call(event))
         self._s2s_tool_tasks.add(task)
         task.add_done_callback(self._s2s_tool_tasks.discard)
 
     async def _s2s_handle_function_call(self, event: FunctionCall):
-        """Bridge S2S function calls to the existing trigger_api() infrastructure.
-
-        On any failure, sends a structured error back as the function_call_output
-        so the model isn't left waiting indefinitely. After this call's reply is
-        submitted, if no other tool calls are still pending, fire a single
-        response.create to let the model continue.
-        """
         s2s = self.tools["s2s"]
         is_transfer = event.name.startswith("transfer_call")
         try:
@@ -4473,8 +4443,6 @@ class TaskManager(BaseManager):
                 logger.error(f"S2S: failed to deliver error result for '{event.name}': {send_err}")
         finally:
             self._s2s_pending_calls.discard(event.call_id)
-            # Last reply for this response cycle — let the model continue.
-            # Skip on transfer_call since the call is hanging up.
             if not self._s2s_pending_calls and not is_transfer:
                 try:
                     await s2s.commit_function_results()
