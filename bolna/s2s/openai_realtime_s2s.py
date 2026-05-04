@@ -73,6 +73,15 @@ class OpenAIRealtimeS2S(BaseS2SProvider):
         self._current_phase: Optional[str] = None  # "commentary" or "final_answer"
         self._current_response_transcript = ""
         self._turn_start_time: Optional[float] = None
+        self.usage_total = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cached_tokens": 0,
+            "input_audio_tokens": 0,
+            "output_audio_tokens": 0,
+            "input_text_tokens": 0,
+            "output_text_tokens": 0,
+        }
 
     @property
     def _is_beta_model(self) -> bool:
@@ -260,7 +269,8 @@ class OpenAIRealtimeS2S(BaseS2SProvider):
                     self._turn_start_time = None
                 self._current_response_transcript = ""
                 self._current_phase = None
-                yield ResponseDone(transcript=transcript)
+                usage = self._extract_usage(event)
+                yield ResponseDone(transcript=transcript, usage=usage)
 
             # --- Interruption ---
             elif event_type == "input_audio_buffer.speech_started":
@@ -394,6 +404,32 @@ class OpenAIRealtimeS2S(BaseS2SProvider):
                     }
                 )
         return formatted
+
+    def _extract_usage(self, event: dict) -> Optional[dict]:
+        """Extract token usage from a response.done event and accumulate it.
+
+        OpenAI Realtime returns:
+            response.usage.{input_tokens, output_tokens,
+                            input_token_details.{text_tokens, audio_tokens, cached_tokens},
+                            output_token_details.{text_tokens, audio_tokens}}
+        """
+        raw = (event.get("response") or {}).get("usage")
+        if not raw:
+            return None
+        in_details = raw.get("input_token_details") or {}
+        out_details = raw.get("output_token_details") or {}
+        usage = {
+            "input_tokens": raw.get("input_tokens", 0),
+            "output_tokens": raw.get("output_tokens", 0),
+            "cached_tokens": in_details.get("cached_tokens", 0),
+            "input_audio_tokens": in_details.get("audio_tokens", 0),
+            "output_audio_tokens": out_details.get("audio_tokens", 0),
+            "input_text_tokens": in_details.get("text_tokens", 0),
+            "output_text_tokens": out_details.get("text_tokens", 0),
+        }
+        for k, v in usage.items():
+            self.usage_total[k] += v or 0
+        return usage
 
     def _generate_silence_padding(self) -> bytes:
         """Generate PCM silence (zeros) for preamble_silence_ms duration at 24kHz."""

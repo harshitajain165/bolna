@@ -4189,6 +4189,10 @@ class TaskManager(BaseManager):
         await s2s.connect()
         logger.info("S2S conversation started")
 
+        self._s2s_last_user_transcript = ""
+        self._s2s_last_assistant_transcript = ""
+        self._s2s_turn_seq = 0
+
         # Trigger welcome message — model will speak from its instructions
         welcome = self.kwargs.get("agent_welcome_message", "").strip()
         self._s2s_welcome_done = not bool(welcome)
@@ -4301,12 +4305,14 @@ class TaskManager(BaseManager):
                 if event.is_final and event.content:
                     logger.info(f"S2S assistant said: {event.content[:200]}")
                     self.conversation_history.append_assistant(event.content)
+                    self._s2s_last_assistant_transcript = event.content
 
             elif isinstance(event, InputTranscript):
                 if event.is_final and event.content:
                     logger.info(f"S2S user said: {event.content[:200]}")
                     self.conversation_history.append_user(event.content)
                     self.time_since_last_spoken_human_word = time.time()
+                    self._s2s_last_user_transcript = event.content
 
             elif isinstance(event, FunctionCall):
                 asyncio.create_task(self._s2s_handle_function_call(event))
@@ -4329,6 +4335,8 @@ class TaskManager(BaseManager):
                 if not self._s2s_welcome_done:
                     self._s2s_welcome_done = True
                     logger.info("S2S welcome message complete, enabling audio input")
+                if event.usage:
+                    self._log_s2s_turn_usage(event)
                 # Send end-of-stream marker
                 await self.buffered_output_queue.put(
                     {
@@ -4354,6 +4362,45 @@ class TaskManager(BaseManager):
                 break
 
             await self.tools["output"].handle(message)
+
+    def _log_s2s_turn_usage(self, event: ResponseDone):
+        """Write LLM request/response rows to the run_id CSV so dashboard cost
+        calculation picks up S2S turns through the existing pipeline.
+        """
+        usage = event.usage or {}
+        s2s_cfg = self.task_config["tools_config"].get("s2s") or {}
+        model = (s2s_cfg.get("provider_config") or {}).get("model") or "gpt-4o-realtime-preview"
+
+        self._s2s_turn_seq += 1
+        seq_id = self._s2s_turn_seq
+        meta = {"request_id": str(uuid.uuid4()), "sequence_id": seq_id}
+
+        # REQUEST row: user input that triggered this turn
+        if self._s2s_last_user_transcript:
+            convert_to_request_log(
+                message=self._s2s_last_user_transcript,
+                meta_info=meta,
+                model=model,
+                component=LogComponent.LLM,
+                direction=LogDirection.REQUEST,
+                run_id=self.run_id,
+            )
+
+        # RESPONSE row: assistant output + token counts
+        # Audio + text tokens summed into input/output; cached tokens tracked separately
+        convert_to_request_log(
+            message=event.transcript or self._s2s_last_assistant_transcript or "",
+            meta_info=meta,
+            model=model,
+            component=LogComponent.LLM,
+            direction=LogDirection.RESPONSE,
+            run_id=self.run_id,
+            input_tokens=usage.get("input_tokens", 0),
+            output_tokens=usage.get("output_tokens", 0),
+            cached_tokens=usage.get("cached_tokens", 0) or None,
+        )
+        self._s2s_last_user_transcript = ""
+        self._s2s_last_assistant_transcript = ""
 
     async def _s2s_handle_function_call(self, event: FunctionCall):
         """Bridge S2S function calls to existing trigger_api() infrastructure."""

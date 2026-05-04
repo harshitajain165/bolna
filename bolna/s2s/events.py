@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Optional
 
 
 @dataclass
@@ -54,6 +55,7 @@ class ResponseDone:
     """A full model response (turn) has completed."""
 
     transcript: str
+    usage: Optional[dict] = field(default=None)
 
 
 @dataclass
