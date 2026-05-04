@@ -317,6 +317,11 @@ class OpenAIRealtimeS2S(BaseS2SProvider):
     # ------------------------------------------------------------------
 
     async def send_function_result(self, call_id: str, result: str) -> None:
+        """Submit a single function_call_output item.
+
+        Does not trigger a response — call commit_function_results() once after
+        all outputs for a given response.done have been submitted.
+        """
         await self._send(
             {
                 "type": "conversation.item.create",
@@ -327,7 +332,9 @@ class OpenAIRealtimeS2S(BaseS2SProvider):
                 },
             }
         )
-        # Trigger model to continue after receiving the tool result
+
+    async def commit_function_results(self) -> None:
+        """Tell the model to continue after function_call_output(s) submitted."""
         await self._send({"type": "response.create"})
 
     # ------------------------------------------------------------------

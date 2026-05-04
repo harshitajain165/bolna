@@ -4192,6 +4192,8 @@ class TaskManager(BaseManager):
         self._s2s_last_user_transcript = ""
         self._s2s_last_assistant_transcript = ""
         self._s2s_turn_seq = 0
+        self._s2s_pending_calls: set = set()
+        self._s2s_tool_tasks: set = set()
 
         # Trigger welcome message — model will speak from its instructions
         welcome = self.kwargs.get("agent_welcome_message", "").strip()
@@ -4315,7 +4317,7 @@ class TaskManager(BaseManager):
                     self._s2s_last_user_transcript = event.content
 
             elif isinstance(event, FunctionCall):
-                asyncio.create_task(self._s2s_handle_function_call(event))
+                self._s2s_dispatch_function_call(event)
 
             elif isinstance(event, Interrupted):
                 if not self._s2s_welcome_done:
@@ -4402,8 +4404,25 @@ class TaskManager(BaseManager):
         self._s2s_last_user_transcript = ""
         self._s2s_last_assistant_transcript = ""
 
+    def _s2s_dispatch_function_call(self, event: FunctionCall):
+        """Dispatch a tool call as a tracked task; commit response when all
+        outstanding calls have responded.
+        """
+        self._s2s_pending_calls.add(event.call_id)
+        task = asyncio.create_task(self._s2s_handle_function_call(event))
+        self._s2s_tool_tasks.add(task)
+        task.add_done_callback(self._s2s_tool_tasks.discard)
+
     async def _s2s_handle_function_call(self, event: FunctionCall):
-        """Bridge S2S function calls to existing trigger_api() infrastructure."""
+        """Bridge S2S function calls to the existing trigger_api() infrastructure.
+
+        On any failure, sends a structured error back as the function_call_output
+        so the model isn't left waiting indefinitely. After this call's reply is
+        submitted, if no other tool calls are still pending, fire a single
+        response.create to let the model continue.
+        """
+        s2s = self.tools["s2s"]
+        is_transfer = event.name.startswith("transfer_call")
         try:
             api_tools = self.kwargs.get("api_tools", {})
             tools_params = api_tools.get("tools_params", {})
@@ -4411,12 +4430,9 @@ class TaskManager(BaseManager):
 
             if not tool_config:
                 logger.warning(f"S2S function call '{event.name}' not found in api_tools")
-                await self.tools["s2s"].send_function_result(
-                    event.call_id, json.dumps({"error": f"Unknown function: {event.name}"})
-                )
+                await s2s.send_function_result(event.call_id, json.dumps({"error": f"Unknown function: {event.name}"}))
                 return
 
-            # Parse function arguments
             try:
                 fn_args = json.loads(event.arguments) if event.arguments else {}
             except json.JSONDecodeError as e:
@@ -4431,18 +4447,28 @@ class TaskManager(BaseManager):
 
             meta_info = {"request_id": str(uuid.uuid4()), "sequence_id": None}
             result = await trigger_api(url, method, param, api_token, headers, meta_info, self.run_id, **fn_args)
+            await s2s.send_function_result(event.call_id, str(result))
 
-            await self.tools["s2s"].send_function_result(event.call_id, str(result))
-
-            # Handle transfer_call
-            if event.name.startswith("transfer_call"):
+            if is_transfer:
                 logger.info(f"S2S transfer_call triggered with args: {fn_args}")
                 self.ended_by_assistant = True
                 await self.process_call_hangup()
 
         except Exception as e:
-            logger.error(f"S2S function call error for '{event.name}': {e}")
-            await self.tools["s2s"].send_function_result(event.call_id, json.dumps({"error": str(e)}))
+            logger.exception(f"S2S function call error for '{event.name}': {e}")
+            try:
+                await s2s.send_function_result(event.call_id, json.dumps({"error": str(e)}))
+            except Exception as send_err:
+                logger.error(f"S2S: failed to deliver error result for '{event.name}': {send_err}")
+        finally:
+            self._s2s_pending_calls.discard(event.call_id)
+            # Last reply for this response cycle — let the model continue.
+            # Skip on transfer_call since the call is hanging up.
+            if not self._s2s_pending_calls and not is_transfer:
+                try:
+                    await s2s.commit_function_results()
+                except Exception as commit_err:
+                    logger.error(f"S2S: commit_function_results failed: {commit_err}")
 
     async def run(self):
         self._component_error = None  # Reset for each run
