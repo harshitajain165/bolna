@@ -60,6 +60,7 @@ from bolna.helpers.utils import (
     clean_json_string,
     wav_bytes_to_pcm,
     convert_to_request_log,
+    is_s2s_agent,
     yield_chunks_from_memory,
     process_task_cancellation,
     pcm_to_ulaw,
@@ -122,7 +123,7 @@ class TaskManager(BaseManager):
         self.language = DEFAULT_LANGUAGE_CODE
         self.transfer_call_params = self.kwargs.get("transfer_call_params", None)
 
-        self.is_s2s = task["tools_config"].get("s2s") is not None
+        self.is_s2s = is_s2s_agent(task)
 
         if task["tools_config"].get("api_tools", None) is not None:
             self.kwargs["api_tools"] = task["tools_config"]["api_tools"]
