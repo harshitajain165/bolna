@@ -492,6 +492,7 @@ class OpenAIRealtimeConfig(BaseModel):
     preamble_silence_ms: Optional[int] = 300
     temperature: Optional[float] = 0.8
     max_response_output_tokens: Optional[int] = None
+    welcome_audio_gate_ms: Optional[int] = 1500
 
 
 class S2SConfig(BaseModel):

@@ -4194,6 +4194,9 @@ class TaskManager(BaseManager):
         self._s2s_turn_seq = 0
         self._s2s_pending_calls: set = set()
         self._s2s_tool_tasks: set = set()
+        s2s_cfg = (self.task_config["tools_config"].get("s2s") or {}).get("provider_config") or {}
+        self._s2s_welcome_gate_ms = int(s2s_cfg.get("welcome_audio_gate_ms") or 1500)
+        self._s2s_welcome_started_at = time.time()
 
         # Trigger welcome message — model will speak from its instructions
         welcome = self.kwargs.get("agent_welcome_message", "").strip()
@@ -4244,8 +4247,10 @@ class TaskManager(BaseManager):
                     break
                 continue
 
-            # Hold back user audio during welcome message to avoid VAD interruption
-            if not self._s2s_welcome_done:
+            # Hold back user audio briefly while the welcome message starts so
+            # the agent's own voice doesn't trigger barge-in. After the gate
+            # window expires, audio flows through and provider VAD can fire.
+            if not self._s2s_welcome_done and self._s2s_within_welcome_gate():
                 chunks_discarded += 1
                 continue
 
@@ -4320,8 +4325,8 @@ class TaskManager(BaseManager):
                 self._s2s_dispatch_function_call(event)
 
             elif isinstance(event, Interrupted):
-                if not self._s2s_welcome_done:
-                    logger.info("S2S: ignoring barge-in during welcome message")
+                if not self._s2s_welcome_done and self._s2s_within_welcome_gate():
+                    logger.info("S2S: ignoring barge-in within welcome gate")
                     continue
                 logger.info("S2S: user barged in, clearing output queue")
                 if "output" in self.tools:
@@ -4364,6 +4369,11 @@ class TaskManager(BaseManager):
                 break
 
             await self.tools["output"].handle(message)
+
+    def _s2s_within_welcome_gate(self) -> bool:
+        """True while the welcome-message gate is still suppressing barge-in."""
+        elapsed_ms = (time.time() - self._s2s_welcome_started_at) * 1000
+        return elapsed_ms < self._s2s_welcome_gate_ms
 
     def _log_s2s_turn_usage(self, event: ResponseDone):
         """Write LLM request/response rows to the run_id CSV so dashboard cost
