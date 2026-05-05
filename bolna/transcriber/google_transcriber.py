@@ -254,7 +254,7 @@ class GoogleTranscriber(BaseTranscriber):
                 except Exception:
                     logger.exception("Non-bytes chunk received in google audio generator; dropping")
 
-    def _append_turn_latency(self):
+    def _append_turn_latency(self, final_transcript: str = ""):
         """
         Add a turn latency entry compatible with the Deepgram 'turn_latencies' entries.
         Called when a final transcript arrives (end-of-turn semantics).
@@ -269,6 +269,7 @@ class GoogleTranscriber(BaseTranscriber):
                         "sequence_id": self.current_turn_id,
                         "first_result_latency_ms": first_ms,
                         "total_stream_duration_ms": int(round(total_s * 1000)),
+                        "final_transcript": final_transcript,
                     }
                 )
                 # also expose on meta_info for immediate consumption
@@ -367,7 +368,7 @@ class GoogleTranscriber(BaseTranscriber):
                                 pass
 
                             # append to turn_latencies (A)
-                            self._append_turn_latency()
+                            self._append_turn_latency(transcript)
 
                             data = {"type": "transcript", "content": transcript}
                             self._enqueue_output(data, meta=self.meta_info)

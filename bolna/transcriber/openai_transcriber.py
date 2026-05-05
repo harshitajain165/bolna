@@ -432,6 +432,7 @@ class OpenAITranscriber(BaseTranscriber):
                                     "total_stream_duration_ms": round(
                                         (self.meta_info.get("transcriber_total_stream_duration") or 0) * 1000
                                     ),
+                                    "final_transcript": transcript,
                                 }
                             )
                             self._reset_turn_state()

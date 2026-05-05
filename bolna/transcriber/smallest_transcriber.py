@@ -293,6 +293,7 @@ class SmallestTranscriber(BaseTranscriber):
                     "interim_details": self.current_turn_interim_details,
                     "first_interim_to_final_ms": first_interim_to_final_ms,
                     "last_interim_to_final_ms": last_interim_to_final_ms,
+                    "final_transcript": transcript_to_send,
                     "force_finalized": True,
                 }
             )
@@ -598,6 +599,7 @@ class SmallestTranscriber(BaseTranscriber):
                                     "interim_details": self.current_turn_interim_details,
                                     "first_interim_to_final_ms": first_interim_to_final_ms,
                                     "last_interim_to_final_ms": last_interim_to_final_ms,
+                                    "final_transcript": segment_transcript,
                                 }
                             )
                         except Exception as e:
